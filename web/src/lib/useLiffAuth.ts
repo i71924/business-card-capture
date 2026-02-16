@@ -25,13 +25,13 @@ const DEFAULT_STATE: LiffAuthState = {
 
 export function useLiffAuth() {
   const [state, setState] = useState<LiffAuthState>(DEFAULT_STATE);
-  const liffId = import.meta.env.VITE_LIFF_ID as string | undefined;
+  const liffId = (import.meta.env.VITE_LIFF_ID as string | undefined) ?? '';
 
   useEffect(() => {
     let cancelled = false;
 
     async function init() {
-      if (!liffId) {
+      if (!liffId.trim()) {
         setState({
           ...DEFAULT_STATE,
           ready: true,
@@ -96,7 +96,7 @@ export function useLiffAuth() {
   return useMemo(
     () => ({
       ...state,
-      liffId: liffId || ''
+      liffId
     }),
     [state, liffId]
   );

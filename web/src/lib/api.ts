@@ -1,15 +1,16 @@
 import type { CardFields, CardRecord, SearchParams } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
-const API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
-const BRIDGE_TIMEOUT_MS = 60_000;
+function requiredEnv(name: 'VITE_API_BASE' | 'VITE_API_TOKEN') {
+  const value = import.meta.env[name] as string | undefined;
+  if (!value) {
+    throw new Error(`Missing ${name} in .env`);
+  }
+  return value;
+}
 
-if (!API_BASE) {
-  throw new Error('Missing VITE_API_BASE in .env');
-}
-if (!API_TOKEN) {
-  throw new Error('Missing VITE_API_TOKEN in .env');
-}
+const API_BASE = requiredEnv('VITE_API_BASE');
+const API_TOKEN = requiredEnv('VITE_API_TOKEN');
+const BRIDGE_TIMEOUT_MS = 60_000;
 
 interface BridgeEnvelope<TPayload> {
   __gas_bridge: true;
@@ -39,7 +40,7 @@ function buildUrl(path: string, query?: Record<string, string>) {
   return url;
 }
 
-function withToken<T extends Record<string, unknown>>(payload: T): T & { api_token: string } {
+function withToken(payload: Record<string, unknown>) {
   return {
     ...payload,
     api_token: API_TOKEN
@@ -63,7 +64,7 @@ async function waitForBridgeMessage<TPayload>(callbackId: string, timeoutMs = BR
   return new Promise<TPayload>((resolve, reject) => {
     const timer = window.setTimeout(() => {
       window.removeEventListener('message', onMessage);
-      reject(new Error('API timeout')); 
+      reject(new Error('API timeout'));
     }, timeoutMs);
 
     const onMessage = (event: MessageEvent) => {
