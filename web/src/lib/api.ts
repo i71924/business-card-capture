@@ -1,6 +1,6 @@
 import type { CardFields, CardRecord, SearchParams } from '../types';
 
-function requiredEnv(name: 'VITE_API_BASE' | 'VITE_API_TOKEN') {
+function requiredEnv(name: 'VITE_API_BASE' | 'VITE_API_TOKEN' | 'VITE_API_POST_BASE') {
   const value = import.meta.env[name] as string | undefined;
   if (!value) {
     throw new Error(`Missing ${name} in .env`);
@@ -8,13 +8,14 @@ function requiredEnv(name: 'VITE_API_BASE' | 'VITE_API_TOKEN') {
   return value;
 }
 
-const API_BASE = requiredEnv('VITE_API_BASE');
+const API_GET_BASE = requiredEnv('VITE_API_BASE');
+const API_POST_BASE = (import.meta.env.VITE_API_POST_BASE as string | undefined)?.trim() || API_GET_BASE;
 const API_TOKEN = requiredEnv('VITE_API_TOKEN');
 const ADD_POLL_TIMEOUT_MS = 180_000;
 const ADD_POLL_INTERVAL_MS = 2_000;
 
-function buildUrl(path: string, query?: Record<string, string>) {
-  const url = new URL(API_BASE);
+function buildUrl(base: string, path: string, query?: Record<string, string>) {
+  const url = new URL(base);
   url.searchParams.set('path', path);
   url.searchParams.set('api_token', API_TOKEN);
   if (query) {
@@ -49,7 +50,7 @@ function postViaForm(path: string, payload: Record<string, unknown>) {
 
     const form = document.createElement('form');
     form.method = 'POST';
-    form.action = buildUrl(path).toString();
+    form.action = buildUrl(API_POST_BASE, path).toString();
     form.target = target;
     form.style.display = 'none';
 
@@ -100,7 +101,7 @@ function requestViaJsonp<T>(path: string, query?: Record<string, string>, timeou
     const callbacks = store || {};
     (window as unknown as Record<string, unknown>)[callbackRoot] = callbacks;
 
-    const url = buildUrl(path, {
+    const url = buildUrl(API_GET_BASE, path, {
       ...(query || {}),
       callback: callbackName
     });

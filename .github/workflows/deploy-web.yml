@@ -38,6 +38,7 @@ jobs:
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
           VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
+          VITE_API_POST_BASE: ${{ secrets.VITE_API_POST_BASE }}
           VITE_API_TOKEN: ${{ secrets.VITE_API_TOKEN }}
           VITE_LIFF_ID: ${{ secrets.VITE_LIFF_ID }}
         run: npm run build

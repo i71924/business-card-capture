@@ -57,11 +57,17 @@ Google Drive 資料夾 URL 範例：
 建立 `web/.env`（可複製 `web/.env.example`）：
 
 ```env
-VITE_API_BASE=https://script.google.com/macros/s/REPLACE_WITH_DEPLOYMENT_ID/exec
+VITE_API_BASE=https://script.googleusercontent.com/macros/echo?user_content_key=...&lib=...
+VITE_API_POST_BASE=https://script.google.com/macros/s/REPLACE_WITH_DEPLOYMENT_ID/exec
 VITE_API_TOKEN=replace_with_api_token
 VITE_LIFF_ID=2000000000-xxxxxxxx
 VITE_BASE_PATH=/
 ```
+
+說明：
+
+- `VITE_API_BASE`：給 `GET`（search/get）使用，可放 `script.googleusercontent.com` 最終 URL。
+- `VITE_API_POST_BASE`：給 `POST`（add/update）使用，務必放 `script.google.com/.../exec`。
 
 ## 4. GitHub Pages 部署（建議正式使用）
 
@@ -72,6 +78,7 @@ VITE_BASE_PATH=/
 在 repo Settings -> Secrets and variables -> Actions 新增：
 
 - `VITE_API_BASE`
+- `VITE_API_POST_BASE`
 - `VITE_API_TOKEN`
 - `VITE_LIFF_ID`
 
