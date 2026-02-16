@@ -10,7 +10,7 @@ function requiredEnv(name: 'VITE_API_BASE' | 'VITE_API_TOKEN') {
 
 const API_BASE = requiredEnv('VITE_API_BASE');
 const API_TOKEN = requiredEnv('VITE_API_TOKEN');
-const BRIDGE_TIMEOUT_MS = 60_000;
+const BRIDGE_TIMEOUT_MS = 180_000;
 
 interface BridgeEnvelope<TPayload> {
   __gas_bridge: true;
@@ -148,6 +148,23 @@ async function requestViaFetchGet<T>(path: string, query?: Record<string, string
   return parseJsonResponse<T>(response);
 }
 
+async function requestViaFetchSimplePost<T>(
+  path: string,
+  payload: Record<string, unknown>,
+  timeoutMs = 120_000
+) {
+  const response = await fetchWithTimeout(
+    buildUrl(path).toString(),
+    {
+      method: 'POST',
+      // Do not set custom headers to avoid CORS preflight in LIFF/webview.
+      body: JSON.stringify(withToken(payload))
+    },
+    timeoutMs
+  );
+  return parseJsonResponse<T>(response);
+}
+
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 8000) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -186,16 +203,32 @@ function toUpdatePayload(fields: Partial<CardFields>) {
 }
 
 export async function addCard(input: { imageBase64: string; filename?: string }) {
-  // POST add on mobile Safari/Chrome against GAS is often blocked by CORS redirect behavior.
-  return requestViaIframePost<{ ok: boolean; id: string; fields: Partial<CardFields> }>(
-    'add',
-    input
-  );
+  try {
+    return await requestViaFetchSimplePost<{ ok: boolean; id: string; fields: Partial<CardFields> }>(
+      'add',
+      input
+    );
+  } catch (error) {
+    if (!shouldFallbackToIframe(error)) {
+      throw error;
+    }
+    return requestViaIframePost<{ ok: boolean; id: string; fields: Partial<CardFields> }>(
+      'add',
+      input
+    );
+  }
 }
 
 export async function updateCard(id: string, fields: Partial<CardFields>) {
   const payload = { id, fields: toUpdatePayload(fields) };
-  return requestViaIframePost<{ ok: boolean }>('update', payload);
+  try {
+    return await requestViaFetchSimplePost<{ ok: boolean }>('update', payload);
+  } catch (error) {
+    if (!shouldFallbackToIframe(error)) {
+      throw error;
+    }
+    return requestViaIframePost<{ ok: boolean }>('update', payload);
+  }
 }
 
 export async function searchCards(params: SearchParams) {
