@@ -25,7 +25,7 @@ function CardsPage() {
     try {
       const result = await searchCards(nextFilters);
       if (!result.ok) {
-        throw new Error('查詢失敗');
+        throw new Error(result.error || '查詢失敗');
       }
       setItems(result.items);
     } catch (err) {

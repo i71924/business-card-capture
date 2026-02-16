@@ -204,30 +204,34 @@ function toUpdatePayload(fields: Partial<CardFields>) {
 
 export async function addCard(input: { imageBase64: string; filename?: string }) {
   try {
-    return await requestViaFetchSimplePost<{ ok: boolean; id: string; fields: Partial<CardFields> }>(
-      'add',
-      input
-    );
+    return await requestViaFetchSimplePost<{
+      ok: boolean;
+      id: string;
+      fields: Partial<CardFields>;
+      error?: string;
+    }>('add', input);
   } catch (error) {
     if (!shouldFallbackToIframe(error)) {
       throw error;
     }
-    return requestViaIframePost<{ ok: boolean; id: string; fields: Partial<CardFields> }>(
-      'add',
-      input
-    );
+    return requestViaIframePost<{
+      ok: boolean;
+      id: string;
+      fields: Partial<CardFields>;
+      error?: string;
+    }>('add', input);
   }
 }
 
 export async function updateCard(id: string, fields: Partial<CardFields>) {
   const payload = { id, fields: toUpdatePayload(fields) };
   try {
-    return await requestViaFetchSimplePost<{ ok: boolean }>('update', payload);
+    return await requestViaFetchSimplePost<{ ok: boolean; error?: string }>('update', payload);
   } catch (error) {
     if (!shouldFallbackToIframe(error)) {
       throw error;
     }
-    return requestViaIframePost<{ ok: boolean }>('update', payload);
+    return requestViaIframePost<{ ok: boolean; error?: string }>('update', payload);
   }
 }
 
@@ -241,23 +245,32 @@ export async function searchCards(params: SearchParams) {
     sort: params.sort
   };
   try {
-    return await requestViaFetchGet<{ ok: boolean; items: CardRecord[] }>('search', query);
+    return await requestViaFetchGet<{ ok: boolean; items: CardRecord[]; error?: string }>(
+      'search',
+      query
+    );
   } catch (error) {
     if (!shouldFallbackToIframe(error)) {
       throw error;
     }
-    return requestViaIframeGet<{ ok: boolean; items: CardRecord[] }>('search', query);
+    return requestViaIframeGet<{ ok: boolean; items: CardRecord[]; error?: string }>(
+      'search',
+      query
+    );
   }
 }
 
 export async function getCard(id: string) {
   const query = { id };
   try {
-    return await requestViaFetchGet<{ ok: boolean; item: CardRecord }>('get', query);
+    return await requestViaFetchGet<{ ok: boolean; item: CardRecord; error?: string }>(
+      'get',
+      query
+    );
   } catch (error) {
     if (!shouldFallbackToIframe(error)) {
       throw error;
     }
-    return requestViaIframeGet<{ ok: boolean; item: CardRecord }>('get', query);
+    return requestViaIframeGet<{ ok: boolean; item: CardRecord; error?: string }>('get', query);
   }
 }

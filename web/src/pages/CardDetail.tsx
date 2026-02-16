@@ -32,7 +32,7 @@ function CardDetailPage() {
       try {
         const result = await getCard(id);
         if (!result.ok) {
-          throw new Error('讀取失敗');
+          throw new Error(result.error || '讀取失敗');
         }
 
         setFields({
@@ -63,7 +63,7 @@ function CardDetailPage() {
     try {
       const result = await updateCard(id, fields);
       if (!result.ok) {
-        throw new Error('儲存失敗');
+        throw new Error(result.error || '儲存失敗');
       }
       setSaved(true);
     } catch (err) {
