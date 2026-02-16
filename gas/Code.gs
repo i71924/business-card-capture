@@ -510,11 +510,34 @@ function jsonResponse_(payload) {
 }
 
 function buildResponse_(e, payload) {
+  const callback = getJsonpCallback_(e);
+  if (callback) {
+    return jsonpResponse_(callback, payload);
+  }
+
   const transport = String((e && e.parameter && e.parameter.transport) || '').toLowerCase();
   if (transport === 'postmessage') {
     return postMessageResponse_(e, payload);
   }
   return jsonResponse_(payload);
+}
+
+function getJsonpCallback_(e) {
+  const raw = String((e && e.parameter && e.parameter.callback) || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  if (!/^[a-zA-Z_$][0-9a-zA-Z_$\\.]{0,120}$/.test(raw)) {
+    throw new Error('Invalid callback');
+  }
+
+  return raw;
+}
+
+function jsonpResponse_(callback, payload) {
+  const body = callback + '(' + JSON.stringify(payload).replace(/</g, '\\u003c') + ');';
+  return ContentService.createTextOutput(body).setMimeType(ContentService.MimeType.JAVASCRIPT);
 }
 
 function postMessageResponse_(e, payload) {

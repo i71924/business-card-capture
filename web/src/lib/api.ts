@@ -10,21 +10,8 @@ function requiredEnv(name: 'VITE_API_BASE' | 'VITE_API_TOKEN') {
 
 const API_BASE = requiredEnv('VITE_API_BASE');
 const API_TOKEN = requiredEnv('VITE_API_TOKEN');
-const BRIDGE_TIMEOUT_MS = 180_000;
-
-interface BridgeEnvelope<TPayload> {
-  __gas_bridge: true;
-  callbackId: string;
-  payload: TPayload;
-}
-
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
-  return JSON.parse(text) as T;
-}
+const ADD_POLL_TIMEOUT_MS = 180_000;
+const ADD_POLL_INTERVAL_MS = 2_000;
 
 function buildUrl(path: string, query?: Record<string, string>) {
   const url = new URL(API_BASE);
@@ -47,97 +34,26 @@ function withToken(payload: Record<string, unknown>) {
   };
 }
 
-function createCallbackId() {
-  return `gas_bridge_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}
-
-function isBridgeEnvelope(value: unknown): value is BridgeEnvelope<unknown> {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const maybe = value as Record<string, unknown>;
-  return maybe.__gas_bridge === true && typeof maybe.callbackId === 'string';
-}
-
-async function waitForBridgeMessage<TPayload>(callbackId: string, timeoutMs = BRIDGE_TIMEOUT_MS) {
-  return new Promise<TPayload>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      window.removeEventListener('message', onMessage);
-      reject(new Error('API timeout'));
-    }, timeoutMs);
-
-    const onMessage = (event: MessageEvent) => {
-      if (!isBridgeEnvelope(event.data)) {
-        return;
-      }
-      if (event.data.callbackId !== callbackId) {
-        return;
-      }
-
-      window.clearTimeout(timer);
-      window.removeEventListener('message', onMessage);
-      resolve(event.data.payload as TPayload);
-    };
-
-    window.addEventListener('message', onMessage);
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
   });
 }
 
-async function requestViaIframeGet<T>(path: string, query?: Record<string, string>) {
-  const callbackId = createCallbackId();
-  const url = buildUrl(path, query);
-  url.searchParams.set('transport', 'postmessage');
-  url.searchParams.set('callback_id', callbackId);
-
-  const iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  iframe.src = url.toString();
-
-  const waitPromise = waitForBridgeMessage<T>(callbackId);
-  document.body.appendChild(iframe);
-
-  try {
-    return await waitPromise;
-  } finally {
-    iframe.remove();
-  }
-}
-
-async function requestViaFetchGet<T>(path: string, query?: Record<string, string>) {
-  const response = await fetchWithTimeout(buildUrl(path, query).toString(), {
-    headers: {
-      'X-API-TOKEN': API_TOKEN
-    }
-  });
-  return parseJsonResponse<T>(response);
-}
-
-async function requestViaFetchSimplePost<T>(
-  path: string,
-  payload: Record<string, unknown>,
-  timeoutMs = 120_000
-) {
-  const response = await fetchWithTimeout(
-    buildUrl(path).toString(),
-    {
-      method: 'POST',
-      // Do not set custom headers to avoid CORS preflight in LIFF/webview.
-      body: JSON.stringify(withToken(payload))
-    },
-    timeoutMs
-  );
-  return parseJsonResponse<T>(response);
-}
-
-async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 8000) {
+async function postNoCors(path: string, payload: Record<string, unknown>, timeoutMs = 20_000) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    await fetch(buildUrl(path).toString(), {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify(withToken(payload)),
+      signal: controller.signal
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Fetch timeout');
+      throw new Error('POST timeout');
     }
     throw error;
   } finally {
@@ -145,20 +61,53 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, ti
   }
 }
 
-function shouldFallbackToIframe(error: unknown) {
-  return (
-    error instanceof TypeError ||
-    (error instanceof Error &&
-      (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')))
-  );
-}
+function requestViaJsonp<T>(path: string, query?: Record<string, string>, timeoutMs = 15_000) {
+  return new Promise<T>((resolve, reject) => {
+    const callbackId = `cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const callbackRoot = '__gasJsonpCallbacks';
+    const callbackName = `${callbackRoot}.${callbackId}`;
 
-function networkHint(path: 'add' | 'update') {
-  const needsGoogleUserContent = API_BASE.includes('script.google.com/macros/s/');
-  if (needsGoogleUserContent) {
-    return `${path} 網路請求失敗。請把 VITE_API_BASE 改成 script.googleusercontent.com 的最終 URL 再部署。`;
-  }
-  return `${path} 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。`;
+    const store = (window as unknown as Record<string, unknown>)[callbackRoot] as
+      | Record<string, (payload: T) => void>
+      | undefined;
+
+    const callbacks = store || {};
+    (window as unknown as Record<string, unknown>)[callbackRoot] = callbacks;
+
+    const url = buildUrl(path, {
+      ...(query || {}),
+      callback: callbackName
+    });
+
+    const script = document.createElement('script');
+    let done = false;
+
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      delete callbacks[callbackId];
+      script.remove();
+    };
+
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('JSONP timeout'));
+    }, timeoutMs);
+
+    callbacks[callbackId] = (payload: T) => {
+      cleanup();
+      resolve(payload);
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error('JSONP network error'));
+    };
+
+    script.src = url.toString();
+    document.body.appendChild(script);
+  });
 }
 
 function toUpdatePayload(fields: Partial<CardFields>) {
@@ -175,70 +124,86 @@ function toUpdatePayload(fields: Partial<CardFields>) {
   };
 }
 
-export async function addCard(input: { imageBase64: string; filename?: string }) {
-  try {
-    return await requestViaFetchSimplePost<{
-      ok: boolean;
-      id: string;
-      fields: Partial<CardFields>;
-      error?: string;
-    }>('add', input);
-  } catch (error) {
-    if (shouldFallbackToIframe(error)) {
-      throw new Error(networkHint('add'));
-    }
-    throw error;
+async function fetchNewestCard() {
+  const result = await requestViaJsonp<{ ok: boolean; items: CardRecord[]; error?: string }>('search', {
+    sort: 'newest'
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error || 'search failed');
   }
+
+  return result.items[0] || null;
+}
+
+export async function addCard(input: { imageBase64: string; filename?: string }) {
+  const before = await fetchNewestCard().catch(() => null);
+  const beforeId = before?.id || '';
+  const startedAt = Date.now();
+
+  try {
+    await postNoCors('add', input, 30_000);
+  } catch {
+    throw new Error('add 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。');
+  }
+
+  while (Date.now() - startedAt < ADD_POLL_TIMEOUT_MS) {
+    await sleep(ADD_POLL_INTERVAL_MS);
+
+    const latest = await fetchNewestCard().catch(() => null);
+    if (!latest) {
+      continue;
+    }
+
+    if (beforeId && latest.id === beforeId) {
+      continue;
+    }
+
+    const createdAtTs = new Date(latest.created_at).getTime();
+    if (!beforeId && !Number.isNaN(createdAtTs) && createdAtTs < startedAt - 10_000) {
+      continue;
+    }
+
+    return {
+      ok: true,
+      id: latest.id,
+      fields: {
+        name: latest.name,
+        company: latest.company,
+        title: latest.title,
+        phone: latest.phone,
+        email: latest.email,
+        address: latest.address,
+        website: latest.website,
+        tags: latest.tags,
+        notes: latest.notes
+      }
+    };
+  }
+
+  throw new Error('API timeout（add 已送出但未在期限內讀到新資料）');
 }
 
 export async function updateCard(id: string, fields: Partial<CardFields>) {
-  const payload = { id, fields: toUpdatePayload(fields) };
   try {
-    return await requestViaFetchSimplePost<{ ok: boolean; error?: string }>('update', payload);
-  } catch (error) {
-    if (shouldFallbackToIframe(error)) {
-      throw new Error(networkHint('update'));
-    }
-    throw error;
+    await postNoCors('update', { id, fields: toUpdatePayload(fields) }, 20_000);
+    return { ok: true };
+  } catch {
+    throw new Error('update 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。');
   }
 }
 
 export async function searchCards(params: SearchParams) {
-  const query = {
+  return requestViaJsonp<{ ok: boolean; items: CardRecord[]; error?: string }>('search', {
     q: params.q,
     company: params.company,
     tag: params.tag,
     from: params.from,
     to: params.to,
     sort: params.sort
-  };
-  try {
-    return await requestViaFetchGet<{ ok: boolean; items: CardRecord[]; error?: string }>(
-      'search',
-      query
-    );
-  } catch (error) {
-    if (!shouldFallbackToIframe(error)) {
-      throw error;
-    }
-    return requestViaIframeGet<{ ok: boolean; items: CardRecord[]; error?: string }>(
-      'search',
-      query
-    );
-  }
+  });
 }
 
 export async function getCard(id: string) {
-  const query = { id };
-  try {
-    return await requestViaFetchGet<{ ok: boolean; item: CardRecord; error?: string }>(
-      'get',
-      query
-    );
-  } catch (error) {
-    if (!shouldFallbackToIframe(error)) {
-      throw error;
-    }
-    return requestViaIframeGet<{ ok: boolean; item: CardRecord; error?: string }>('get', query);
-  }
+  return requestViaJsonp<{ ok: boolean; item: CardRecord; error?: string }>('get', { id });
 }
