@@ -53,7 +53,7 @@ function NewCardPage() {
       const result = await addCard({ imageBase64, filename: file.name || 'card.jpg' });
 
       if (!result.ok) {
-        throw new Error(result.error || '後端回傳失敗');
+        throw new Error('後端回傳失敗');
       }
 
       setStatus('辨識完成，請確認欄位後按儲存');
@@ -83,7 +83,7 @@ function NewCardPage() {
     try {
       const result = await updateCard(cardId, fields);
       if (!result.ok) {
-        throw new Error(result.error || '儲存失敗');
+        throw new Error('儲存失敗');
       }
       setSaved(true);
       setStatus('儲存完成');
