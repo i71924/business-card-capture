@@ -124,25 +124,35 @@ function toUpdatePayload(fields: Partial<CardFields>) {
   };
 }
 
-async function fetchNewestCard() {
-  const result = await requestViaJsonp<{ ok: boolean; items: CardRecord[]; error?: string }>('search', {
-    sort: 'newest'
+function createClientId() {
+  return `card_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function fetchCardById(id: string) {
+  const result = await requestViaJsonp<{ ok: boolean; item?: CardRecord; error?: string }>('get', {
+    id
   });
 
   if (!result.ok) {
-    throw new Error(result.error || 'search failed');
+    return null;
   }
 
-  return result.items[0] || null;
+  return result.item || null;
 }
 
 export async function addCard(input: { imageBase64: string; filename?: string }) {
-  const before = await fetchNewestCard().catch(() => null);
-  const beforeId = before?.id || '';
+  const clientId = createClientId();
   const startedAt = Date.now();
 
   try {
-    await postNoCors('add', input, 30_000);
+    await postNoCors(
+      'add',
+      {
+        ...input,
+        id: clientId
+      },
+      30_000
+    );
   } catch {
     throw new Error('add 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。');
   }
@@ -150,33 +160,24 @@ export async function addCard(input: { imageBase64: string; filename?: string })
   while (Date.now() - startedAt < ADD_POLL_TIMEOUT_MS) {
     await sleep(ADD_POLL_INTERVAL_MS);
 
-    const latest = await fetchNewestCard().catch(() => null);
-    if (!latest) {
-      continue;
-    }
-
-    if (beforeId && latest.id === beforeId) {
-      continue;
-    }
-
-    const createdAtTs = new Date(latest.created_at).getTime();
-    if (!beforeId && !Number.isNaN(createdAtTs) && createdAtTs < startedAt - 10_000) {
+    const item = await fetchCardById(clientId).catch(() => null);
+    if (!item) {
       continue;
     }
 
     return {
       ok: true,
-      id: latest.id,
+      id: item.id,
       fields: {
-        name: latest.name,
-        company: latest.company,
-        title: latest.title,
-        phone: latest.phone,
-        email: latest.email,
-        address: latest.address,
-        website: latest.website,
-        tags: latest.tags,
-        notes: latest.notes
+        name: item.name,
+        company: item.company,
+        title: item.title,
+        phone: item.phone,
+        email: item.email,
+        address: item.address,
+        website: item.website,
+        tags: item.tags,
+        notes: item.notes
       }
     };
   }

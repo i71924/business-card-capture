@@ -88,7 +88,8 @@ function handleAdd_(e) {
     });
   }
 
-  const id = Utilities.getUuid();
+  const incomingId = String(body.id || '').trim();
+  const id = isValidIncomingId_(incomingId) ? incomingId : Utilities.getUuid();
   const createdAt = new Date().toISOString();
   const imageFileId = file.getId();
   const imageUrl = 'https://drive.google.com/file/d/' + imageFileId + '/view';
@@ -128,6 +129,13 @@ function handleAdd_(e) {
       notes: ''
     }
   };
+}
+
+function isValidIncomingId_(id) {
+  if (!id) {
+    return false;
+  }
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(id);
 }
 
 function handleSearch_(e) {
