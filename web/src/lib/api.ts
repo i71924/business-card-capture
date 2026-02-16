@@ -104,41 +104,6 @@ async function requestViaIframeGet<T>(path: string, query?: Record<string, strin
   }
 }
 
-async function requestViaIframePost<T>(path: string, payload: Record<string, unknown>) {
-  const callbackId = createCallbackId();
-  const url = buildUrl(path);
-  url.searchParams.set('transport', 'postmessage');
-  url.searchParams.set('callback_id', callbackId);
-
-  const iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  iframe.name = callbackId;
-
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = url.toString();
-  form.target = callbackId;
-  form.style.display = 'none';
-
-  const payloadInput = document.createElement('input');
-  payloadInput.type = 'hidden';
-  payloadInput.name = 'payload';
-  payloadInput.value = JSON.stringify(withToken(payload));
-  form.appendChild(payloadInput);
-
-  const waitPromise = waitForBridgeMessage<T>(callbackId);
-  document.body.appendChild(iframe);
-  document.body.appendChild(form);
-
-  try {
-    form.submit();
-    return await waitPromise;
-  } finally {
-    form.remove();
-    iframe.remove();
-  }
-}
-
 async function requestViaFetchGet<T>(path: string, query?: Record<string, string>) {
   const response = await fetchWithTimeout(buildUrl(path, query).toString(), {
     headers: {
@@ -188,6 +153,14 @@ function shouldFallbackToIframe(error: unknown) {
   );
 }
 
+function networkHint(path: 'add' | 'update') {
+  const needsGoogleUserContent = API_BASE.includes('script.google.com/macros/s/');
+  if (needsGoogleUserContent) {
+    return `${path} 網路請求失敗。請把 VITE_API_BASE 改成 script.googleusercontent.com 的最終 URL 再部署。`;
+  }
+  return `${path} 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。`;
+}
+
 function toUpdatePayload(fields: Partial<CardFields>) {
   return {
     name: fields.name ?? '',
@@ -211,15 +184,10 @@ export async function addCard(input: { imageBase64: string; filename?: string })
       error?: string;
     }>('add', input);
   } catch (error) {
-    if (!shouldFallbackToIframe(error)) {
-      throw error;
+    if (shouldFallbackToIframe(error)) {
+      throw new Error(networkHint('add'));
     }
-    return requestViaIframePost<{
-      ok: boolean;
-      id: string;
-      fields: Partial<CardFields>;
-      error?: string;
-    }>('add', input);
+    throw error;
   }
 }
 
@@ -228,10 +196,10 @@ export async function updateCard(id: string, fields: Partial<CardFields>) {
   try {
     return await requestViaFetchSimplePost<{ ok: boolean; error?: string }>('update', payload);
   } catch (error) {
-    if (!shouldFallbackToIframe(error)) {
-      throw error;
+    if (shouldFallbackToIframe(error)) {
+      throw new Error(networkHint('update'));
     }
-    return requestViaIframePost<{ ok: boolean; error?: string }>('update', payload);
+    throw error;
   }
 }
 
