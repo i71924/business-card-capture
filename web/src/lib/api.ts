@@ -40,25 +40,51 @@ function sleep(ms: number) {
   });
 }
 
-async function postNoCors(path: string, payload: Record<string, unknown>, timeoutMs = 20_000) {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+function postViaForm(path: string, payload: Record<string, unknown>) {
+  return new Promise<void>((resolve, reject) => {
+    const target = `gas_post_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const iframe = document.createElement('iframe');
+    iframe.name = target;
+    iframe.style.display = 'none';
 
-  try {
-    await fetch(buildUrl(path).toString(), {
-      method: 'POST',
-      mode: 'no-cors',
-      body: JSON.stringify(withToken(payload)),
-      signal: controller.signal
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('POST timeout');
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timer);
-  }
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = buildUrl(path).toString();
+    form.target = target;
+    form.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'payload';
+    input.value = JSON.stringify(withToken(payload));
+    form.appendChild(input);
+
+    const cleanup = () => {
+      form.remove();
+      iframe.remove();
+    };
+
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('POST timeout'));
+    }, 30_000);
+
+    iframe.onload = () => {
+      window.clearTimeout(timer);
+      cleanup();
+      resolve();
+    };
+
+    iframe.onerror = () => {
+      window.clearTimeout(timer);
+      cleanup();
+      reject(new Error('POST network error'));
+    };
+
+    document.body.appendChild(iframe);
+    document.body.appendChild(form);
+    form.submit();
+  });
 }
 
 function requestViaJsonp<T>(path: string, query?: Record<string, string>, timeoutMs = 15_000) {
@@ -145,14 +171,10 @@ export async function addCard(input: { imageBase64: string; filename?: string })
   const startedAt = Date.now();
 
   try {
-    await postNoCors(
-      'add',
-      {
-        ...input,
-        id: clientId
-      },
-      30_000
-    );
+    await postViaForm('add', {
+      ...input,
+      id: clientId
+    });
   } catch {
     throw new Error('add 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。');
   }
@@ -187,7 +209,7 @@ export async function addCard(input: { imageBase64: string; filename?: string })
 
 export async function updateCard(id: string, fields: Partial<CardFields>) {
   try {
-    await postNoCors('update', { id, fields: toUpdatePayload(fields) }, 20_000);
+    await postViaForm('update', { id, fields: toUpdatePayload(fields) });
     return { ok: true };
   } catch {
     throw new Error('update 網路請求失敗。請確認 GAS Web App 已重新部署且 API_BASE/API_TOKEN 正確。');
